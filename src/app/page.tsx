@@ -1,9 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface Invoice {
   id: string
@@ -14,6 +20,12 @@ interface Invoice {
   daysOverdue: number
   status: 'current' | 'overdue' | 'critical'
   industry: string
+}
+
+interface UploadedFile {
+  name: string
+  size: number
+  type: string
 }
 
 const INVOICES: Invoice[] = [
@@ -43,19 +55,73 @@ function fmt(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount)
 }
 
+function fileIcon(type: string) {
+  if (type.includes('pdf')) return '📄'
+  if (type.includes('sheet') || type.includes('excel') || type.includes('csv')) return '📊'
+  if (type.includes('word') || type.includes('document')) return '📝'
+  if (type.includes('image')) return '🖼️'
+  return '📎'
+}
+
+function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+type QBStep = 'login' | 'authorizing' | 'connected'
+
 export default function DemoPage() {
   const [analysis, setAnalysis] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<'all' | 'overdue' | 'critical' | 'current'>('all')
   const [exporting, setExporting] = useState(false)
 
+  // QuickBooks connect modal
+  const [qbOpen, setQbOpen] = useState(false)
+  const [qbStep, setQbStep] = useState<QBStep>('login')
+  const [qbLoading, setQbLoading] = useState(false)
+
+  // File upload
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const totalOutstanding = INVOICES.reduce((s, i) => s + i.amount, 0)
   const overdue = INVOICES.filter(i => i.daysOverdue > 0)
   const critical = INVOICES.filter(i => i.status === 'critical')
   const totalOverdue = overdue.reduce((s, i) => s + i.amount, 0)
   const current = INVOICES.filter(i => i.status === 'current')
-
   const filtered = filter === 'all' ? INVOICES : INVOICES.filter(i => i.status === filter)
+
+  // QB OAuth simulation
+  function openQB() {
+    setQbStep('login')
+    setQbOpen(true)
+  }
+
+  function handleQBAuthorize() {
+    setQbLoading(true)
+    setQbStep('authorizing')
+    setTimeout(() => {
+      setQbStep('connected')
+      setQbLoading(false)
+    }, 2000)
+  }
+
+  // File upload
+  function handleFiles(files: FileList | null) {
+    if (!files) return
+    const accepted = Array.from(files).map(f => ({ name: f.name, size: f.size, type: f.type }))
+    setUploadedFiles(prev => [...prev, ...accepted])
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    handleFiles(e.dataTransfer.files)
+  }
 
   async function runAnalysis() {
     setLoading(true)
@@ -176,6 +242,7 @@ export default function DemoPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Header */}
       <header className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -188,6 +255,15 @@ export default function DemoPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+              ↑ Upload File
+            </Button>
+            <Button variant="outline" size="sm" onClick={openQB} className="border-[#2CA01C] text-[#2CA01C] hover:bg-green-50">
+              <svg className="w-4 h-4 mr-1.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+              </svg>
+              Connect QuickBooks
+            </Button>
             <Button variant="outline" size="sm" onClick={exportPDF} disabled={exporting}>
               {exporting ? 'Generating…' : '↓ Export PDF'}
             </Button>
@@ -199,6 +275,7 @@ export default function DemoPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="border-slate-200">
             <CardHeader className="pb-1 pt-4 px-4"><CardTitle className="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Outstanding</CardTitle></CardHeader>
@@ -218,6 +295,7 @@ export default function DemoPage() {
           </Card>
         </div>
 
+        {/* AI Analysis */}
         {(analysis || loading) && (
           <Card className="border-blue-200 bg-blue-50/30">
             <CardHeader className="pb-2">
@@ -238,6 +316,7 @@ export default function DemoPage() {
           </Card>
         )}
 
+        {/* Invoice Table */}
         <Card className="border-slate-200">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -293,6 +372,142 @@ export default function DemoPage() {
           Demo · Data is illustrative · AI analysis via Groq Llama 3.3 70B · Built with Next.js &amp; QuickBooks API
         </p>
       </main>
+
+      {/* QuickBooks Connect Modal */}
+      <Dialog open={qbOpen} onOpenChange={open => { setQbOpen(open); if (!open) setQbStep('login') }}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden">
+          {qbStep === 'login' && (
+            <div>
+              <div className="bg-[#2CA01C] px-6 py-5 flex items-center gap-3">
+                <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
+                  <span className="text-[#2CA01C] font-bold text-sm">QB</span>
+                </div>
+                <div>
+                  <p className="text-white font-semibold text-sm">QuickBooks Online</p>
+                  <p className="text-green-100 text-xs">Intuit Inc.</p>
+                </div>
+              </div>
+              <div className="px-6 py-6 space-y-4">
+                <DialogHeader>
+                  <DialogTitle className="text-base">Sign in to QuickBooks</DialogTitle>
+                  <p className="text-xs text-slate-500">Invoice Analyzer is requesting access to your QuickBooks data</p>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Email or user ID</label>
+                    <input defaultValue="demo@company.com" className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600 block mb-1">Password</label>
+                    <input type="password" defaultValue="••••••••" className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                  </div>
+                </div>
+                <Button onClick={handleQBAuthorize} className="w-full bg-[#2CA01C] hover:bg-[#238016] text-white">
+                  Sign In & Authorize
+                </Button>
+                <p className="text-center text-xs text-slate-400">
+                  Secure OAuth 2.0 connection · No password stored
+                </p>
+              </div>
+            </div>
+          )}
+
+          {qbStep === 'authorizing' && (
+            <div className="px-6 py-12 flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-green-200 border-t-[#2CA01C] rounded-full animate-spin" />
+              <div className="text-center">
+                <p className="font-medium text-slate-800 text-sm">Connecting to QuickBooks…</p>
+                <p className="text-xs text-slate-400 mt-1">Fetching your company data securely</p>
+              </div>
+            </div>
+          )}
+
+          {qbStep === 'connected' && (
+            <div className="px-6 py-8 flex flex-col items-center gap-4 text-center">
+              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
+                <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-800">QuickBooks Connected!</p>
+                <p className="text-xs text-slate-500 mt-1">Company: <span className="font-medium">Acme Corp LLC</span></p>
+                <p className="text-xs text-slate-500">Synced <span className="font-medium">20 outstanding invoices</span> · Last updated just now</p>
+              </div>
+              <div className="w-full bg-slate-50 rounded-lg p-3 text-left space-y-1.5">
+                <p className="text-xs font-medium text-slate-600">Access granted:</p>
+                <p className="text-xs text-slate-500">✓ Read invoices &amp; customers</p>
+                <p className="text-xs text-slate-500">✓ Read accounts receivable</p>
+                <p className="text-xs text-slate-500">✓ Read financial reports</p>
+              </div>
+              <Button onClick={() => setQbOpen(false)} className="w-full bg-[#2CA01C] hover:bg-[#238016] text-white">
+                Start Analyzing
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload File Modal */}
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Upload Documents</DialogTitle>
+            <p className="text-xs text-slate-500">Upload invoices, statements, or reports to include in the analysis</p>
+          </DialogHeader>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
+          >
+            <div className="text-3xl mb-2">📂</div>
+            <p className="text-sm font-medium text-slate-700">Drop files here or click to browse</p>
+            <p className="text-xs text-slate-400 mt-1">PDF, Excel (.xlsx), Word (.docx), Images (PNG, JPG)</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.xlsx,.xls,.doc,.docx,.png,.jpg,.jpeg,.csv"
+              className="hidden"
+              onChange={e => handleFiles(e.target.files)}
+            />
+          </div>
+
+          {/* File list */}
+          {uploadedFiles.length > 0 && (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{uploadedFiles.length} file{uploadedFiles.length > 1 ? 's' : ''} uploaded</p>
+              {uploadedFiles.map((f, i) => (
+                <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-lg px-3 py-2">
+                  <span className="text-xl">{fileIcon(f.type)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-slate-700 truncate">{f.name}</p>
+                    <p className="text-xs text-slate-400">{fileSize(f.size)}</p>
+                  </div>
+                  <div className="flex items-center gap-1 text-green-600">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-xs">Ready</span>
+                  </div>
+                  <button onClick={() => setUploadedFiles(prev => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-slate-500 text-lg leading-none">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="outline" size="sm" onClick={() => setUploadOpen(false)}>Cancel</Button>
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => setUploadOpen(false)} disabled={uploadedFiles.length === 0}>
+              {uploadedFiles.length > 0 ? `Process ${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''}` : 'Upload Files'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
